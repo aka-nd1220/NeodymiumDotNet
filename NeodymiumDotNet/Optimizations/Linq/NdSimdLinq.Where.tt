@@ -1,0 +1,109 @@
+﻿<#@ template debug="false" hostspecific="false" language="C#" #>
+<#@ assembly name="System.Core" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Text" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ output extension=".g.cs" #>
+<#
+    string Indent(IEnumerable<string> lines, int level)
+    {
+        var space = string.Concat(Enumerable.Range(0, level).Select(_ => "    "));
+        return string.Join("\r\n" + space, lines);
+    }
+
+    IEnumerable<string> ParamDocs(int arrayNum)
+    {
+        yield return "/// <param name=\"ndarray1\"></param>";
+        for(var i = 2;i <= arrayNum;++i)
+            yield return $"/// <param name=\"ndarray{i}\"> [<c>ndarray1.Shape == ndarray{i}.Shape</c>] </param>";
+    }
+
+    IEnumerable<string> Args(int arrayNum)
+    {
+        var i = 1;
+        for(; i <= arrayNum - 1 ; ++i)
+            yield return $"NdArray<T> ndarray{i},";
+        yield return $"NdArray<T> ndarray{i}";
+    }
+
+    IEnumerable<string> Guard(int arrayNum)
+    {
+    for(var i = 2 ; i <= arrayNum ; ++i)
+        yield return $"Guard.AssertShapeMatch(ndarray1.Shape, ndarray{i}.Shape, nameof(ndarray1) + \".\" + nameof(INdArray<T>.Shape), nameof(ndarray{i}) + \".\" + nameof(INdArray<T>.Shape));";
+    }
+
+    string FuncType(int arrayNum)
+        => "Expression<Func<" + string.Join(", ", Enumerable.Range(1, arrayNum).Select(i => $"T")) + ", T>>";
+#>
+using System;
+using System.Linq.Expressions;
+
+namespace NeodymiumDotNet.Optimizations.Linq
+{
+    partial class NdSimdLinq
+    {
+<#
+for(var i = 2; i < 8 ; ++i)
+{
+    var types = string.Join(", ", Enumerable.Range(1, i).Select(x => $"T"));
+    var implArgs = string.Join(", ", Enumerable.Range(1, i).Select(x => $"ndarray{x}"));
+#>
+        #region <#=i#> arguments input
+
+        /// <summary>
+        ///     [Pure] Applies selector against each corresponding element set of input NdArrays.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        <#=Indent(ParamDocs(i), 2)#>
+        /// <param name="selector"></param>
+        /// <returns></returns>
+        public static NdArray<T> Zip<T>(this
+                <#=Indent(Args(i), 4)#>,
+                <#=FuncType(i)#> selector
+            )
+            where T : unmanaged
+        {
+            ReadOnlyMemory<T> getSource(NdArray<T> ndarray)
+                => ndarray.Entity switch
+                {
+                    IBufferNdArrayImpl<T> romProvider => romProvider.Buffer,
+                    _ => default(ReadOnlyMemory<T>?),
+                } ?? throw new NotSupportedException();
+
+            <#=Indent(Guard(i), 3)#>
+
+            <#=Indent(Enumerable.Range(1, i).Select(j => $"var source{j} = getSource(ndarray{j});"), 3)#>
+            var simdSelector = VectorOperation.Simdize(selector);
+            var resultEntity = new RawNdArrayImpl<T>(ndarray1.Shape);
+            simdSelector(<#=string.Join(", ", Enumerable.Range(1, i).Select(j => $"source{j}"))#>, resultEntity.Buffer.Slice(0, resultEntity.Length));
+            return new NdArray<T>(resultEntity);
+        }
+
+
+        /// <summary>
+        ///     [Pure] Applies selector against each corresponding element set of input NdArrays.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="argsTuple">
+<# for(var j = 2; j <= i; ++j) { #>
+        ///     <para>[<c>argsTuple.Item1.Shape == argsTuple.Item<#=j#>.Shape</c>]</para>
+<# } #>
+        ///     <para>The tuple of <see cref="NdArray{T}"/> for selector. </para>
+        /// </param>
+        /// <param name="selector"></param>
+        /// <returns></returns>
+        public static NdArray<T> Zip<T>(this
+                (<#=string.Join(", ", Enumerable.Range(1, i).Select(j => $"NdArray<T>"))#>) argsTuple,
+                <#=FuncType(i)#> selector
+            )
+            where T : unmanaged
+            => Zip(<#=string.Join(", ", Enumerable.Range(1, i).Select(x => $"argsTuple.Item{x}"))#>, selector);
+
+        #endregion
+
+
+<#
+}
+#>
+    }
+}

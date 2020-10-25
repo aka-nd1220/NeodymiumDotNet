@@ -1,0 +1,558 @@
+﻿<#@ template debug="false" hostspecific="false" language="C#" #>
+<#@ assembly name="System.Core" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Text" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ output extension=".g.cs" #>
+<#
+var unaryOps = new UnaryOpInfo[]
+{
+    new UnaryOpInfo("UnaryNegate", x => $"ValueTrait.UnaryNegate({x})", x => $"-{x}", new []{ "byte", "ushort", "uint", "ulong", "sbyte", "short", "int", "long", "float", "double", }),
+    new UnaryOpInfo("Complement" , x => $"ValueTrait.Complement({x})" , x => $"~{x}", new []{ "byte", "ushort", "uint", "ulong", "sbyte", "short", "int", "long", }),
+};
+var binaryOps = new []
+{
+    new BinaryOpInfo("Add"       , (x, y) => $"ValueTrait.Add({x}, {y})"       , (x, y) => $"{x} + {y}", new []{ "byte", "ushort", "uint", "ulong", "sbyte", "short", "int", "long", "float", "double", }),
+    new BinaryOpInfo("Subtract"  , (x, y) => $"ValueTrait.Subtract({x}, {y})"  , (x, y) => $"{x} - {y}", new []{ "byte", "ushort", "uint", "ulong", "sbyte", "short", "int", "long", "float", "double", }),
+    new BinaryOpInfo("Multiply"  , (x, y) => $"ValueTrait.Multiply({x}, {y})"  , (x, y) => $"{x} * {y}", new []{                                             "short", "int",         "float", "double", }),
+    new BinaryOpInfo("Divide"    , (x, y) => $"ValueTrait.Divide({x}, {y})"    , (x, y) => $"{x} / {y}", new []{                                                                     "float", "double", }),
+    new BinaryOpInfo("BitwiseAnd", (x, y) => $"ValueTrait.BitwiseAnd({x}, {y})", (x, y) => $"{x} & {y}", new []{ "byte", "ushort", "uint", "ulong", "sbyte", "short", "int", "long",                    }),
+    new BinaryOpInfo("BitwiseOr" , (x, y) => $"ValueTrait.BitwiseOr({x}, {y})" , (x, y) => $"{x} | {y}", new []{ "byte", "ushort", "uint", "ulong", "sbyte", "short", "int", "long",                    }),
+    new BinaryOpInfo("BitwiseXor", (x, y) => $"ValueTrait.BitwiseXor({x}, {y})", (x, y) => $"{x} ^ {y}", new []{ "byte", "ushort", "uint", "ulong", "sbyte", "short", "int", "long",                    }),
+};
+#>
+using System;
+using System.Collections.Generic;
+using System.Numerics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+
+
+namespace NeodymiumDotNet.Optimizations
+{
+    partial class VectorOperation
+    {
+<#
+foreach(var op in unaryOps)
+{
+#>
+
+        #region <#=op.Name#>
+
+        /// <summary>
+        ///     Applies <#=op.Name.ToLower()#> operations for a n-d array.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="value"></param>
+        /// <param name="result"> It can be same instance with <paramref name="value"/>, and in that case the instance will be overwritten. </param>
+        /// <exception cref="ShapeMismatchException" />
+        /// <exception cref="NotSupportedException" />
+        public static void <#=op.Name#><T>(INdArray<T> value, MutableNdArray<T> result)
+        {
+            Guard.AssertShapeMatch(value.Shape == result.Shape, "There is shape mismatch.");
+            if(value.TryGetBufferImpl(out var xvalue) && result is RawNdArray<T> xresult)
+            {
+                <#=op.Name#>(xvalue.Buffer, xresult.Entity.Buffer);
+                return;
+            }
+            else
+            {
+                for(var i = 0; i < result.Length; ++i)
+                    result.SetItem(i, <#=op.GenerateItemOp("value.GetItem(i)")#>); 
+            }
+        }
+
+        /// <summary>
+        ///     Applies <#=op.Name.ToLower()#> operations for a memory sequence.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="value"></param>
+        /// <param name="result"></param>
+        /// <exception cref="ArgumentOutOfRangeException" />
+        /// <exception cref="NotSupportedException" />
+        public static void <#=op.Name#><T>(ReadOnlyMemory<T> value, Memory<T> result)
+        {
+            Guard.AssertArgumentRange(result.Length <= value.Length, "result.Length <= value.Length");
+<# foreach(var type in op.Types) { #>
+            if(typeof(T) == typeof(<#=type#>))
+            {
+                <#=op.Name#>Optimized(
+                    Unsafe.As<ReadOnlyMemory<T>, ReadOnlyMemory<<#=type#>>>(ref value),
+                    Unsafe.As<Memory<T>, Memory<<#=type#>>>(ref result));
+                return;
+            }
+<# } #>
+            if(true)
+            {
+                for(var i = 0; i < result.Length; ++i)
+                    result.Span[i] = <#=op.GenerateItemOp("value.Span[i]")#>;
+                return;
+            }
+        }
+
+        private static void <#=op.Name#>Optimized<T>(ReadOnlyMemory<T> value, Memory<T> result)
+            where T : unmanaged
+        {
+            var valueVSpan = MemoryMarshal.Cast<T, Vector<T>>(value.Span);
+            var resultVSpan = MemoryMarshal.Cast<T, Vector<T>>(result.Span);
+            var i = 0;
+            for(var len = resultVSpan.Length & ~0b1111 ; i < len ; i += 16)
+            {
+                resultVSpan[i      ] = <#=op.GenerateSimdOp("valueVSpan[i      ]")#>;
+                resultVSpan[i + 0x1] = <#=op.GenerateSimdOp("valueVSpan[i + 0x1]")#>;
+                resultVSpan[i + 0x2] = <#=op.GenerateSimdOp("valueVSpan[i + 0x2]")#>;
+                resultVSpan[i + 0x3] = <#=op.GenerateSimdOp("valueVSpan[i + 0x3]")#>;
+                resultVSpan[i + 0x4] = <#=op.GenerateSimdOp("valueVSpan[i + 0x4]")#>;
+                resultVSpan[i + 0x5] = <#=op.GenerateSimdOp("valueVSpan[i + 0x5]")#>;
+                resultVSpan[i + 0x6] = <#=op.GenerateSimdOp("valueVSpan[i + 0x6]")#>;
+                resultVSpan[i + 0x7] = <#=op.GenerateSimdOp("valueVSpan[i + 0x7]")#>;
+                resultVSpan[i + 0x8] = <#=op.GenerateSimdOp("valueVSpan[i + 0x8]")#>;
+                resultVSpan[i + 0x9] = <#=op.GenerateSimdOp("valueVSpan[i + 0x9]")#>;
+                resultVSpan[i + 0xA] = <#=op.GenerateSimdOp("valueVSpan[i + 0xA]")#>;
+                resultVSpan[i + 0xB] = <#=op.GenerateSimdOp("valueVSpan[i + 0xB]")#>;
+                resultVSpan[i + 0xC] = <#=op.GenerateSimdOp("valueVSpan[i + 0xC]")#>;
+                resultVSpan[i + 0xD] = <#=op.GenerateSimdOp("valueVSpan[i + 0xD]")#>;
+                resultVSpan[i + 0xE] = <#=op.GenerateSimdOp("valueVSpan[i + 0xE]")#>;
+                resultVSpan[i + 0xF] = <#=op.GenerateSimdOp("valueVSpan[i + 0xF]")#>;
+            }
+            if(i < (resultVSpan.Length & ~0b111))
+            {
+                resultVSpan[i      ] = <#=op.GenerateSimdOp("valueVSpan[i      ]")#>;
+                resultVSpan[i + 0x1] = <#=op.GenerateSimdOp("valueVSpan[i + 0x1]")#>;
+                resultVSpan[i + 0x2] = <#=op.GenerateSimdOp("valueVSpan[i + 0x2]")#>;
+                resultVSpan[i + 0x3] = <#=op.GenerateSimdOp("valueVSpan[i + 0x3]")#>;
+                resultVSpan[i + 0x4] = <#=op.GenerateSimdOp("valueVSpan[i + 0x4]")#>;
+                resultVSpan[i + 0x5] = <#=op.GenerateSimdOp("valueVSpan[i + 0x5]")#>;
+                resultVSpan[i + 0x6] = <#=op.GenerateSimdOp("valueVSpan[i + 0x6]")#>;
+                resultVSpan[i + 0x7] = <#=op.GenerateSimdOp("valueVSpan[i + 0x7]")#>;
+                i += 8;
+            }
+            if(i < (resultVSpan.Length & ~0b11))
+            {
+                resultVSpan[i      ] = <#=op.GenerateSimdOp("valueVSpan[i      ]")#>;
+                resultVSpan[i + 0x1] = <#=op.GenerateSimdOp("valueVSpan[i + 0x1]")#>;
+                resultVSpan[i + 0x2] = <#=op.GenerateSimdOp("valueVSpan[i + 0x2]")#>;
+                resultVSpan[i + 0x3] = <#=op.GenerateSimdOp("valueVSpan[i + 0x3]")#>;
+                i += 4;
+            }
+            if(i < (resultVSpan.Length & ~0b1))
+            {
+                resultVSpan[i      ] = <#=op.GenerateSimdOp("valueVSpan[i      ]")#>;
+                resultVSpan[i + 0x1] = <#=op.GenerateSimdOp("valueVSpan[i + 0x1]")#>;
+                i += 2;
+            }
+            if(i < resultVSpan.Length)
+            {
+                resultVSpan[i      ] = <#=op.GenerateSimdOp("valueVSpan[i      ]")#>;
+                ++i;
+            }
+
+            var valueRemainSpan = value.Span.Slice(Vector<T>.Count * i);
+            var resultRemainSpan = result.Span.Slice(Vector<T>.Count * i);
+            for(var j = 0; j < resultRemainSpan.Length; ++j)
+                resultRemainSpan[j] = <#=op.GenerateItemOp("valueRemainSpan[j]")#>;
+        }
+
+        #endregion
+
+<#
+}
+
+// ====================================================================================================================
+// ====================================================================================================================
+// ====================================================================================================================
+
+foreach(var op in binaryOps)
+{
+#>
+
+        #region <#=op.Name#>
+
+        /// <summary>
+        ///     Applies <#=op.Name.ToLower()#> operations for n-d arrays pair.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="lhs"> [<c>result.Shape &lt;= lhs.Shape</c>] </param>
+        /// <param name="rhs"> [<c>result.Shape &lt;= rhs.Shape</c>] </param>
+        /// <param name="result"> It can be same instance with <paramref name="lhs"/> and <paramref name="rhs"/>, and in that case the instance will be overwritten. </param>
+        /// <exception cref="ShapeMismatchException" />
+        /// <exception cref="NotSupportedException" />
+        public static void <#=op.Name#><T>(INdArray<T> lhs, INdArray<T> rhs, MutableNdArray<T> result)
+        {
+            Guard.AssertShapeMatch(lhs.Shape == result.Shape, "The shape of " + nameof(lhs) + " and " + nameof(rhs) + " are mismatched.");
+            Guard.AssertShapeMatch(rhs.Shape == result.Shape, "The shape of " + nameof(rhs) + " and " + nameof(rhs) + " are mismatched.");
+            if(lhs.TryGetBufferImpl(out var xlhs) && rhs.TryGetBufferImpl(out var xrhs) && result is RawNdArray<T> xresult)
+            {
+                <#=op.Name#>(xlhs.Buffer, xrhs.Buffer, xresult.Entity.Buffer);
+                return;
+            }
+        }
+
+        /// <summary>
+        ///     Applies <#=op.Name.ToLower()#> operations for a scalar and a n-d array pair.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="lhs"></param>
+        /// <param name="rhs"> [<c>result.Shape &lt;= rhs.Shape</c>] </param>
+        /// <param name="result"> It can be same instance with and <paramref name="rhs"/>, and in that case the instance will be overwritten. </param>
+        /// <exception cref="ShapeMismatchException" />
+        /// <exception cref="NotSupportedException" />
+        public static void <#=op.Name#><T>(T lhs, INdArray<T> rhs, MutableNdArray<T> result)
+        {
+            Guard.AssertShapeMatch(rhs.Shape == result.Shape, "The shape of " + nameof(rhs) + " and " + nameof(rhs) + " are mismatched.");
+            if(rhs.TryGetBufferImpl(out var xrhs) && result is RawNdArray<T> xresult)
+            {
+                <#=op.Name#>(lhs, xrhs.Buffer, xresult.Entity.Buffer);
+                return;
+            }
+        }
+
+        /// <summary>
+        ///     Applies <#=op.Name.ToLower()#> operations for a n-d array and a scalar pair.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="lhs"> [<c>result.Shape &lt;= lhs.Shape</c>] </param>
+        /// <param name="rhs"></param>
+        /// <param name="result"> It can be same instance with <paramref name="lhs"/>, and in that case the instance will be overwritten. </param>
+        /// <exception cref="ShapeMismatchException" />
+        /// <exception cref="NotSupportedException" />
+        public static void <#=op.Name#><T>(INdArray<T> lhs, T rhs, MutableNdArray<T> result)
+        {
+            Guard.AssertShapeMatch(lhs.Shape == result.Shape, "The shape of " + nameof(lhs) + " and " + nameof(rhs) + " are mismatched.");
+            if(lhs.TryGetBufferImpl(out var xlhs) && result is RawNdArray<T> xresult)
+            {
+                <#=op.Name#>(xlhs.Buffer, rhs, xresult.Entity.Buffer);
+                return;
+            }
+        }
+
+        /// <summary>
+        ///     Applies <#=op.Name.ToLower()#> operations for memory sequences pair.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="lhs"> [<c>result.Length &lt;= lhs.Length</c>] </param>
+        /// <param name="rhs"> [<c>result.Length &lt;= rhs.Length</c>] </param>
+        /// <param name="result"></param>
+        /// <exception cref="ArgumentOutOfRangeException"></exception>
+        public static void <#=op.Name#><T>(ReadOnlyMemory<T> lhs, ReadOnlyMemory<T> rhs, Memory<T> result)
+        {
+            Guard.AssertArgumentRange(result.Length <= lhs.Length, "result.Length <= lhs.Length");
+            Guard.AssertArgumentRange(result.Length <= rhs.Length, "result.Length <= rhs.Length");
+<# foreach(var type in op.Types) { #>
+            if(typeof(T) == typeof(<#=type#>))
+            {
+                <#=op.Name#>Optimized(
+                    Unsafe.As<ReadOnlyMemory<T>, ReadOnlyMemory<<#=type#>>>(ref lhs),
+                    Unsafe.As<ReadOnlyMemory<T>, ReadOnlyMemory<<#=type#>>>(ref rhs),
+                    Unsafe.As<Memory<T>, Memory<<#=type#>>>(ref result));
+                return;
+            }
+<# } #>
+            if(true)
+            {
+                for(var i = 0; i < result.Length; ++i)
+                    result.Span[i] = <#=op.GenerateItemOp("lhs.Span[i]", "rhs.Span[i]")#>;
+                return;
+            }
+        }
+
+        /// <summary>
+        ///     Applies <#=op.Name.ToLower()#> operations for a scalar and a memory sequence.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="lhs"></param>
+        /// <param name="rhs"> [<c>result.Length &lt;= rhs.Length</c>] </param>
+        /// <param name="result"></param>
+        /// <exception cref="ArgumentOutOfRangeException"></exception>
+        public static void <#=op.Name#><T>(T lhs, ReadOnlyMemory<T> rhs, Memory<T> result)
+        {
+            Guard.AssertArgumentRange(result.Length <= rhs.Length, "result.Length <= rhs.Length");
+<# foreach(var type in op.Types) { #>
+            if(typeof(T) == typeof(<#=type#>))
+            {
+                <#=op.Name#>Optimized(
+                    Unsafe.As<T, <#=type#>>(ref lhs),
+                    Unsafe.As<ReadOnlyMemory<T>, ReadOnlyMemory<<#=type#>>>(ref rhs),
+                    Unsafe.As<Memory<T>, Memory<<#=type#>>>(ref result));
+                return;
+            }
+<# } #>
+            if(true)
+            {
+                for(var i = 0; i < result.Length; ++i)
+                    result.Span[i] = <#=op.GenerateItemOp("lhs", "rhs.Span[i]")#>;
+                return;
+            }
+        }
+
+        /// <summary>
+        ///     Applies <#=op.Name.ToLower()#> operations for a memory sequence and a scalar.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="lhs"> [<c>result.Length &lt;= lhs.Length</c>] </param>
+        /// <param name="rhs"></param>
+        /// <param name="result"></param>
+        /// <exception cref="ArgumentOutOfRangeException"></exception>
+        public static void <#=op.Name#><T>(ReadOnlyMemory<T> lhs, T rhs, Memory<T> result)
+        {
+            Guard.AssertArgumentRange(result.Length <= lhs.Length, "result.Length <= lhs.Length");
+<# foreach(var type in op.Types) { #>
+            if(typeof(T) == typeof(<#=type#>))
+            {
+                <#=op.Name#>Optimized(
+                    Unsafe.As<ReadOnlyMemory<T>, ReadOnlyMemory<<#=type#>>>(ref lhs),
+                    Unsafe.As<T, <#=type#>>(ref rhs),
+                    Unsafe.As<Memory<T>, Memory<<#=type#>>>(ref result));
+                return;
+            }
+<# } #>
+            if(true)
+            {
+                for(var i = 0; i < result.Length; ++i)
+                    result.Span[i] = <#=op.GenerateItemOp("lhs.Span[i]", "rhs")#>;
+                return;
+            }
+        }
+
+        private static void <#=op.Name#>Optimized<T>(ReadOnlyMemory<T> lhs, ReadOnlyMemory<T> rhs, Memory<T> result)
+            where T : unmanaged
+        {
+            var lhsVSpan = MemoryMarshal.Cast<T, Vector<T>>(lhs.Span);
+            var rhsVSpan = MemoryMarshal.Cast<T, Vector<T>>(rhs.Span);
+            var resultVSpan = MemoryMarshal.Cast<T, Vector<T>>(result.Span);
+            var i = 0;
+            for(var len = resultVSpan.Length & ~0b1111 ; i < len ; i += 16)
+            {
+                resultVSpan[i      ] = <#=op.GenerateSimdOp("lhsVSpan[i      ]", "rhsVSpan[i      ]")#>;
+                resultVSpan[i + 0x1] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x1]", "rhsVSpan[i + 0x1]")#>;
+                resultVSpan[i + 0x2] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x2]", "rhsVSpan[i + 0x2]")#>;
+                resultVSpan[i + 0x3] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x3]", "rhsVSpan[i + 0x3]")#>;
+                resultVSpan[i + 0x4] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x4]", "rhsVSpan[i + 0x4]")#>;
+                resultVSpan[i + 0x5] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x5]", "rhsVSpan[i + 0x5]")#>;
+                resultVSpan[i + 0x6] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x6]", "rhsVSpan[i + 0x6]")#>;
+                resultVSpan[i + 0x7] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x7]", "rhsVSpan[i + 0x7]")#>;
+                resultVSpan[i + 0x8] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x8]", "rhsVSpan[i + 0x8]")#>;
+                resultVSpan[i + 0x9] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x9]", "rhsVSpan[i + 0x9]")#>;
+                resultVSpan[i + 0xA] = <#=op.GenerateSimdOp("lhsVSpan[i + 0xA]", "rhsVSpan[i + 0xA]")#>;
+                resultVSpan[i + 0xB] = <#=op.GenerateSimdOp("lhsVSpan[i + 0xB]", "rhsVSpan[i + 0xB]")#>;
+                resultVSpan[i + 0xC] = <#=op.GenerateSimdOp("lhsVSpan[i + 0xC]", "rhsVSpan[i + 0xC]")#>;
+                resultVSpan[i + 0xD] = <#=op.GenerateSimdOp("lhsVSpan[i + 0xD]", "rhsVSpan[i + 0xD]")#>;
+                resultVSpan[i + 0xE] = <#=op.GenerateSimdOp("lhsVSpan[i + 0xE]", "rhsVSpan[i + 0xE]")#>;
+                resultVSpan[i + 0xF] = <#=op.GenerateSimdOp("lhsVSpan[i + 0xF]", "rhsVSpan[i + 0xF]")#>;
+            }
+            if(i < (resultVSpan.Length & ~0b111))
+            {
+                resultVSpan[i      ] = <#=op.GenerateSimdOp("lhsVSpan[i      ]", "rhsVSpan[i      ]")#>;
+                resultVSpan[i + 0x1] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x1]", "rhsVSpan[i + 0x1]")#>;
+                resultVSpan[i + 0x2] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x2]", "rhsVSpan[i + 0x2]")#>;
+                resultVSpan[i + 0x3] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x3]", "rhsVSpan[i + 0x3]")#>;
+                resultVSpan[i + 0x4] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x4]", "rhsVSpan[i + 0x4]")#>;
+                resultVSpan[i + 0x5] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x5]", "rhsVSpan[i + 0x5]")#>;
+                resultVSpan[i + 0x6] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x6]", "rhsVSpan[i + 0x6]")#>;
+                resultVSpan[i + 0x7] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x7]", "rhsVSpan[i + 0x7]")#>;
+                i += 8;
+            }
+            if(i < (resultVSpan.Length & ~0b11))
+            {
+                resultVSpan[i      ] = <#=op.GenerateSimdOp("lhsVSpan[i      ]", "rhsVSpan[i      ]")#>;
+                resultVSpan[i + 0x1] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x1]", "rhsVSpan[i + 0x1]")#>;
+                resultVSpan[i + 0x2] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x2]", "rhsVSpan[i + 0x2]")#>;
+                resultVSpan[i + 0x3] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x3]", "rhsVSpan[i + 0x3]")#>;
+                i += 4;
+            }
+            if(i < (resultVSpan.Length & ~0b1))
+            {
+                resultVSpan[i      ] = <#=op.GenerateSimdOp("lhsVSpan[i      ]", "rhsVSpan[i      ]")#>;
+                resultVSpan[i + 0x1] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x1]", "rhsVSpan[i + 0x1]")#>;
+                i += 2;
+            }
+            if(i < resultVSpan.Length)
+            {
+                resultVSpan[i      ] = <#=op.GenerateSimdOp("lhsVSpan[i      ]", "rhsVSpan[i      ]")#>;
+                ++i;
+            }
+
+            var lhsRemainSpan = lhs.Span.Slice(Vector<T>.Count * i);
+            var rhsRemainSpan = rhs.Span.Slice(Vector<T>.Count * i);
+            var resultRemainSpan = result.Span.Slice(Vector<T>.Count * i);
+            for(var j = 0; j < resultRemainSpan.Length; ++j)
+                resultRemainSpan[j] = <#=op.GenerateItemOp("lhsRemainSpan[j]", "rhsRemainSpan[j]")#>;
+        }
+
+        private static void <#=op.Name#>Optimized<T>(T lhs, ReadOnlyMemory<T> rhs, Memory<T> result)
+            where T : unmanaged
+        {
+            var lhsVector = new Vector<T>(lhs);
+            var rhsVSpan = MemoryMarshal.Cast<T, Vector<T>>(rhs.Span);
+            var resultVSpan = MemoryMarshal.Cast<T, Vector<T>>(result.Span);
+            var i = 0;
+            for(var len = resultVSpan.Length & ~0b1111 ; i < len ; i += 16)
+            {
+                resultVSpan[i      ] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i      ]")#>;
+                resultVSpan[i + 0x1] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0x1]")#>;
+                resultVSpan[i + 0x2] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0x2]")#>;
+                resultVSpan[i + 0x3] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0x3]")#>;
+                resultVSpan[i + 0x4] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0x4]")#>;
+                resultVSpan[i + 0x5] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0x5]")#>;
+                resultVSpan[i + 0x6] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0x6]")#>;
+                resultVSpan[i + 0x7] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0x7]")#>;
+                resultVSpan[i + 0x8] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0x8]")#>;
+                resultVSpan[i + 0x9] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0x9]")#>;
+                resultVSpan[i + 0xA] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0xA]")#>;
+                resultVSpan[i + 0xB] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0xB]")#>;
+                resultVSpan[i + 0xC] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0xC]")#>;
+                resultVSpan[i + 0xD] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0xD]")#>;
+                resultVSpan[i + 0xE] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0xE]")#>;
+                resultVSpan[i + 0xF] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0xF]")#>;
+            }
+            if(i < (resultVSpan.Length & ~0b111))
+            {
+                resultVSpan[i      ] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i      ]")#>;
+                resultVSpan[i + 0x1] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0x1]")#>;
+                resultVSpan[i + 0x2] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0x2]")#>;
+                resultVSpan[i + 0x3] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0x3]")#>;
+                resultVSpan[i + 0x4] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0x4]")#>;
+                resultVSpan[i + 0x5] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0x5]")#>;
+                resultVSpan[i + 0x6] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0x6]")#>;
+                resultVSpan[i + 0x7] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0x7]")#>;
+                i += 8;
+            }
+            if(i < (resultVSpan.Length & ~0b11))
+            {
+                resultVSpan[i      ] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i      ]")#>;
+                resultVSpan[i + 0x1] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0x1]")#>;
+                resultVSpan[i + 0x2] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0x2]")#>;
+                resultVSpan[i + 0x3] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0x3]")#>;
+                i += 4;
+            }
+            if(i < (resultVSpan.Length & ~0b1))
+            {
+                resultVSpan[i      ] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i      ]")#>;
+                resultVSpan[i + 0x1] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i + 0x1]")#>;
+                i += 2;
+            }
+            if(i < resultVSpan.Length)
+            {
+                resultVSpan[i      ] = <#=op.GenerateSimdOp("lhsVector", "rhsVSpan[i      ]")#>;
+                ++i;
+            }
+
+            var rhsRemainSpan = rhs.Span.Slice(Vector<T>.Count * i);
+            var resultRemainSpan = result.Span.Slice(Vector<T>.Count * i);
+            for(var j = 0; j < resultRemainSpan.Length; ++j)
+                resultRemainSpan[j] = <#=op.GenerateItemOp("lhs", "rhsRemainSpan[j]")#>;
+        }
+
+        private static void <#=op.Name#>Optimized<T>(ReadOnlyMemory<T> lhs, T rhs, Memory<T> result)
+            where T : unmanaged
+        {
+            var lhsVSpan = MemoryMarshal.Cast<T, Vector<T>>(lhs.Span);
+            var rhsVector = new Vector<T>(rhs);
+            var resultVSpan = MemoryMarshal.Cast<T, Vector<T>>(result.Span);
+            var i = 0;
+            for(var len = resultVSpan.Length & ~0b1111 ; i < len ; i += 16)
+            {
+                resultVSpan[i      ] = <#=op.GenerateSimdOp("lhsVSpan[i      ]", "rhsVector")#>;
+                resultVSpan[i + 0x1] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x1]", "rhsVector")#>;
+                resultVSpan[i + 0x2] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x2]", "rhsVector")#>;
+                resultVSpan[i + 0x3] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x3]", "rhsVector")#>;
+                resultVSpan[i + 0x4] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x4]", "rhsVector")#>;
+                resultVSpan[i + 0x5] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x5]", "rhsVector")#>;
+                resultVSpan[i + 0x6] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x6]", "rhsVector")#>;
+                resultVSpan[i + 0x7] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x7]", "rhsVector")#>;
+                resultVSpan[i + 0x8] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x8]", "rhsVector")#>;
+                resultVSpan[i + 0x9] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x9]", "rhsVector")#>;
+                resultVSpan[i + 0xA] = <#=op.GenerateSimdOp("lhsVSpan[i + 0xA]", "rhsVector")#>;
+                resultVSpan[i + 0xB] = <#=op.GenerateSimdOp("lhsVSpan[i + 0xB]", "rhsVector")#>;
+                resultVSpan[i + 0xC] = <#=op.GenerateSimdOp("lhsVSpan[i + 0xC]", "rhsVector")#>;
+                resultVSpan[i + 0xD] = <#=op.GenerateSimdOp("lhsVSpan[i + 0xD]", "rhsVector")#>;
+                resultVSpan[i + 0xE] = <#=op.GenerateSimdOp("lhsVSpan[i + 0xE]", "rhsVector")#>;
+                resultVSpan[i + 0xF] = <#=op.GenerateSimdOp("lhsVSpan[i + 0xF]", "rhsVector")#>;
+            }
+            if(i < (resultVSpan.Length & ~0b111))
+            {
+                resultVSpan[i      ] = <#=op.GenerateSimdOp("lhsVSpan[i      ]", "rhsVector")#>;
+                resultVSpan[i + 0x1] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x1]", "rhsVector")#>;
+                resultVSpan[i + 0x2] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x2]", "rhsVector")#>;
+                resultVSpan[i + 0x3] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x3]", "rhsVector")#>;
+                resultVSpan[i + 0x4] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x4]", "rhsVector")#>;
+                resultVSpan[i + 0x5] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x5]", "rhsVector")#>;
+                resultVSpan[i + 0x6] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x6]", "rhsVector")#>;
+                resultVSpan[i + 0x7] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x7]", "rhsVector")#>;
+                i += 8;
+            }
+            if(i < (resultVSpan.Length & ~0b11))
+            {
+                resultVSpan[i      ] = <#=op.GenerateSimdOp("lhsVSpan[i      ]", "rhsVector")#>;
+                resultVSpan[i + 0x1] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x1]", "rhsVector")#>;
+                resultVSpan[i + 0x2] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x2]", "rhsVector")#>;
+                resultVSpan[i + 0x3] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x3]", "rhsVector")#>;
+                i += 4;
+            }
+            if(i < (resultVSpan.Length & ~0b1))
+            {
+                resultVSpan[i      ] = <#=op.GenerateSimdOp("lhsVSpan[i      ]", "rhsVector")#>;
+                resultVSpan[i + 0x1] = <#=op.GenerateSimdOp("lhsVSpan[i + 0x1]", "rhsVector")#>;
+                i += 2;
+            }
+            if(i < resultVSpan.Length)
+            {
+                resultVSpan[i      ] = <#=op.GenerateSimdOp("lhsVSpan[i      ]", "rhsVector")#>;
+                ++i;
+            }
+
+            var lhsRemainSpan = lhs.Span.Slice(Vector<T>.Count * i);
+            var resultRemainSpan = result.Span.Slice(Vector<T>.Count * i);
+            for(var j = 0; j < resultRemainSpan.Length; ++j)
+                resultRemainSpan[j] = <#=op.GenerateItemOp("lhsRemainSpan[j]", "rhs")#>;
+        }
+
+        #endregion
+
+<#
+}
+#>
+    }
+}
+
+<#+
+class UnaryOpInfo
+{
+    public string Name { get; }
+    public Func<string, string> GenerateItemOp { get; }
+    public Func<string, string> GenerateSimdOp { get; }
+    public string[] Types { get; }
+
+    public UnaryOpInfo(
+        string name,
+        Func<string, string> generateItemOp,
+        Func<string, string> generateSimdOp,
+        string[] types)
+    {
+        Name = name;
+        GenerateItemOp = generateItemOp;
+        GenerateSimdOp = generateSimdOp;
+        Types = types;
+    }
+}
+
+class BinaryOpInfo
+{
+    public string Name { get; }
+    public Func<string, string, string> GenerateItemOp { get; }
+    public Func<string, string, string> GenerateSimdOp { get; }
+    public string[] Types { get; }
+
+    public BinaryOpInfo(
+        string name,
+        Func<string, string, string> generateItemOp,
+        Func<string, string, string> generateSimdOp,
+        string[] types)
+    {
+        Name = name;
+        GenerateItemOp = generateItemOp;
+        GenerateSimdOp = generateSimdOp;
+        Types = types;
+    }
+}
+#>

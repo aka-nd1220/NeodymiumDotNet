@@ -1,0 +1,213 @@
+﻿<#@ template debug="true" hostspecific="false" language="C#" #>
+<#@ assembly name="System.Core" #>
+<#@ import namespace="System" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ import namespace="System.Linq" #>
+<#@ output extension=".g.cs" #>
+<#
+    string Indent(IEnumerable<string> lines, int level)
+    {
+        var space = string.Concat(Enumerable.Range(0, level).Select(_ => "    "));
+        return string.Join("\r\n" + space, lines);
+    }
+
+    IEnumerable<string> TypeParamDocs(int arrayNum)
+    {
+        for(var i = 1;i <= arrayNum;++i)
+            yield return $"/// <typeparam name=\"T{i}\"></typeparam>";
+    }
+
+    IEnumerable<string> ParamDocs(int arrayNum)
+    {
+        yield return "/// <param name=\"ndarray1\"></param>";
+        for(var i = 2;i <= arrayNum;++i)
+            yield return $"/// <param name=\"ndarray{i}\"> [<c>ndarray1.Shape == ndarray{i}.Shape</c>] </param>";
+    }
+
+    IEnumerable<string> Args(int arrayNum)
+    {
+        var i = 1;
+        for(; i <= arrayNum - 1 ; ++i)
+            yield return $"NdArray<T{i}> ndarray{i},";
+        yield return $"NdArray<T{i}> ndarray{i}";
+    }
+
+    IEnumerable<string> Guard(int arrayNum)
+    {
+    for(var i = 2 ; i <= arrayNum ; ++i)
+        yield return $"Guard.AssertShapeMatch(ndarray1.Shape, ndarray{i}.Shape, nameof(ndarray1) + \".\" + nameof(INdArray<T1>.Shape), nameof(ndarray{i}) + \".\" + nameof(INdArray<T{i}>.Shape));";
+    }
+
+    string FuncType(int arrayNum)
+        => "Func<" + string.Join(", ", Enumerable.Range(1, arrayNum).Select(i => $"T{i}")) + ", TResult>";
+#>
+//
+// T4 auto generated code
+//
+#nullable enable
+using System;
+
+namespace NeodymiumDotNet.Linq
+{
+    public static partial class NdLinq
+    {
+<#
+for(var i = 2; i < 8 ; ++i)
+{
+    var types = string.Join(", ", Enumerable.Range(1, i).Select(x => $"T{x}"));
+    var implArgs = string.Join(", ", Enumerable.Range(1, i).Select(x => $"ndarray{x}"));
+#>
+        #region <#=i#> arguments input
+
+        /// <summary>
+        ///     [Pure] Zip elements of several NdArrays to tuple.
+        /// </summary>
+        <#=Indent(TypeParamDocs(i), 2)#>
+        <#=Indent(ParamDocs(i), 2)#>
+        /// <returns></returns>
+        public static NdArray<(<#=types#>)> Zip<<#=types#>>(this
+                <#=Indent(Args(i), 4)#>
+            )
+        {
+            <#=Indent(Guard(i), 3)#>
+
+            return new NdArray<(<#=types#>)>(new ZipInTupleArrayImpl<<#=types#>>(<#=string.Join(", ", Enumerable.Range(1, i).Select(x => $"ndarray{x}.Entity"))#>));
+        }
+
+
+        internal sealed class ZipInTupleArrayImpl<<#=types#>>: NdArrayImpl<(<#=types#>)>
+        {
+<# for(var j = 1; j <= i ; ++j){ #>
+            private readonly NdArrayImpl<T<#=j#>> _Src<#=j#>;
+<# } #>
+
+            protected override (<#=types#>) GetItem(int flattenIndex)
+                => (<#=string.Join(", ", Enumerable.Range(1, i).Select(x => $"_Src{x}[flattenIndex]"))#>);
+
+            protected override (<#=types#>) GetItem(ReadOnlySpan<int> shapedIndices)
+                => (<#=string.Join(", ", Enumerable.Range(1, i).Select(x => $"_Src{x}[shapedIndices]"))#>);
+
+            /// <summary>
+            /// 
+            /// </summary>
+            /// <param name="ndarray1"></param>
+<# for(var j = 2; j <= i ; ++j){ #>
+            /// <param name="ndarray<#=j#>"> [<c>ndarray1.Shape == ndarray<#=j#>.Shape</c>] </param>
+<# } #>
+            internal ZipInTupleArrayImpl(<#=string.Join(", ", Enumerable.Range(1, i).Select(x => $"NdArrayImpl<T{x}> ndarray{x}"))#>)
+                : base(ndarray1.Shape)
+            {
+<# for(var j = 1; j <= i ; ++j){ #>
+                _Src<#=j#> = ndarray<#=j#>;
+<# } #>
+            }
+        }
+
+
+        /// <summary>
+        ///     [Pure] Applies selector against each corresponding element set of input NdArrays.
+        /// </summary>
+        <#=Indent(TypeParamDocs(i), 2)#>
+        /// <typeparam name="TResult"></typeparam>
+        <#=Indent(ParamDocs(i), 2)#>
+        /// <param name="selector"></param>
+        /// <returns></returns>
+        public static NdArray<TResult> Zip<<#=types#>, TResult>(this
+                <#=Indent(Args(i), 4)#>,
+                <#=FuncType(i)#> selector
+            )
+            => Zip(<#=implArgs#>, selector, default);
+
+
+        /// <summary>
+        ///     [Pure] Applies selector against each corresponding element set of input NdArrays.
+        /// </summary>
+        <#=Indent(TypeParamDocs(i), 2)#>
+        /// <typeparam name="TResult"></typeparam>
+        <#=Indent(ParamDocs(i), 2)#>
+        /// <param name="selector"></param>
+        /// <param name="strategy">
+        ///     [nullable] A strategy object to iterate calculation for each element.
+        ///     <c>null</c> means to use <see cref="IterationStrategy.Default"/>.
+        /// </param>
+        /// <returns></returns>
+        public static NdArray<TResult> Zip<<#=types#>, TResult>(this
+                <#=Indent(Args(i), 4)#>,
+                <#=FuncType(i)#> selector,
+                IIterationStrategy? strategy = default
+            )
+        {
+            <#=Indent(Guard(i), 3)#>
+            Guard.AssertArgumentNotNull(selector, nameof(selector));
+
+            var len = ndarray1.Length;
+            var resultEntity = new RawNdArrayImpl<TResult>(ndarray1.Shape);
+            var array = resultEntity.Buffer;
+<# for(var j = 1; j <= i ; ++j){ #>
+            var entity<#=j#> = ndarray<#=j#>.Entity is RawNdArrayImpl<T<#=j#>> raw<#=j#> ? raw<#=j#>.Buffer : ndarray<#=j#>.Entity.ToArray();
+<# } #>
+            if(strategy is null || strategy is IterationStrategy)
+            {
+                for(var i = 0; i < len; ++i)
+                    array.Span[i] = selector(<#=string.Join(", ", Enumerable.Range(1, i).Select(j => $"entity{j}.Span[i]"))#>);
+            }
+            else
+            {
+                strategy.For(0, len, i =>
+                    array.Span[i] = selector(<#=string.Join(", ", Enumerable.Range(1, i).Select(j => $"entity{j}.Span[i]"))#>));
+            }
+            return new NdArray<TResult>(resultEntity);
+        }
+
+
+        /// <summary>
+        ///     [Pure] Applies selector against each corresponding element set of input NdArrays.
+        /// </summary>
+        <#=Indent(TypeParamDocs(i), 2)#>
+        /// <typeparam name="TResult"></typeparam>
+        /// <param name="argsTuple">
+<# for(var j = 2; j <= i; ++j) { #>
+        ///     <para>[<c>argsTuple.Item1.Shape == argsTuple.Item<#=j#>.Shape</c>]</para>
+<# } #>
+        ///     <para>The tuple of <see cref="NdArray{T}"/> for selector. </para>
+        /// </param>
+        /// <param name="selector"></param>
+        /// <returns></returns>
+        public static NdArray<TResult> Zip<<#=types#>, TResult>(this
+                (<#=string.Join(", ", Enumerable.Range(1, i).Select(x => $"NdArray<T{x}>"))#>) argsTuple,
+                <#=FuncType(i)#> selector
+            )
+            => Zip(<#=string.Join(", ", Enumerable.Range(1, i).Select(x => $"argsTuple.Item{x}"))#>, selector);
+
+
+        /// <summary>
+        ///     [Pure] Applies selector against each corresponding element set of input NdArrays.
+        /// </summary>
+        <#=Indent(TypeParamDocs(i), 2)#>
+        /// <typeparam name="TResult"></typeparam>
+        /// <param name="argsTuple">
+<# for(var j = 2; j <= i; ++j) { #>
+        ///     <para>[<c>argsTuple.Item1.Shape == argsTuple.Item<#=j#>.Shape</c>]</para>
+<# } #>
+        ///     <para>The tuple of <see cref="NdArray{T}"/> for selector. </para>
+        /// </param>
+        /// <param name="selector"></param>
+        /// <param name="strategy">
+        ///     [nullable] A strategy object to iterate calculation for each element.
+        ///     <c>null</c> means to use <see cref="IterationStrategy.Default"/>.
+        /// </param>
+        /// <returns></returns>
+        public static NdArray<TResult> Zip<<#=types#>, TResult>(this
+                (<#=string.Join(", ", Enumerable.Range(1, i).Select(x => $"NdArray<T{x}>"))#>) argsTuple,
+                <#=FuncType(i)#> selector,
+                IIterationStrategy? strategy = default
+            )
+            => Zip(<#=string.Join(", ", Enumerable.Range(1, i).Select(x => $"argsTuple.Item{x}"))#>, selector, strategy);
+
+        #endregion
+
+<#
+}
+#>
+    }
+}

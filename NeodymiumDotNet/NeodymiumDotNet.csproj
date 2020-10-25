@@ -1,0 +1,118 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFrameworks>netstandard2.0;netstandard2.1</TargetFrameworks>
+        <Version>0.1.0</Version>
+        <LangVersion>8.0</LangVersion>
+        <Nullable>enable</Nullable>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
+        <PackageProjectUrl>https://github.com/GlassGrass/NeodymiumDotNet</PackageProjectUrl>
+        <Copyright>GlassGrass</Copyright>
+        <RepositoryUrl>https://github.com/GlassGrass/NeodymiumDotNet</RepositoryUrl>
+        <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+        <Description>.Net multi-dimentional array library</Description>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+        <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+        <DocumentationFile>D:\develop\CSharp\NeodymiumDotNet\NeodymiumDotNet\NeodymiumDotNet.xml</DocumentationFile>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+        <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+        <DocumentationFile>D:\develop\CSharp\NeodymiumDotNet\NeodymiumDotNet\NeodymiumDotNet.xml</DocumentationFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="System.Buffers" Version="4.5.1" />
+        <PackageReference Include="System.Memory" Version="4.5.4" />
+        <PackageReference Include="System.Reflection.Emit" Version="4.7.0" />
+        <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="4.7.1" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <Service Include="{508349b6-6b84-4df5-91f0-309beebad82d}" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Update="ValueTrait.Operators.tt">
+            <Generator>TextTemplatingFileGenerator</Generator>
+            <LastGenOutput>ValueTrait.Operators.g.cs</LastGenOutput>
+        </None>
+        <Compile Update="ValueTrait.Operators.g.cs">
+            <DesignTime>True</DesignTime>
+            <AutoGen>True</AutoGen>
+            <DependentUpon>ValueTrait.Operators.tt</DependentUpon>
+        </Compile>
+        <None Include="..\LICENSE.txt">
+          <Pack>True</Pack>
+          <PackagePath></PackagePath>
+        </None>
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+      <ProjectReference Include="..\System.Diagnostics.CodeAnalysis.Compatibility\System.Diagnostics.CodeAnalysis.Compatibility.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Update="Linq\NdLinq.Zip.tt">
+            <Generator>TextTemplatingFileGenerator</Generator>
+            <LastGenOutput>NdLinq.Zip.g.cs</LastGenOutput>
+        </None>
+        <Compile Update="Linq\NdLinq.Zip.g.cs">
+            <DesignTime>True</DesignTime>
+            <AutoGen>True</AutoGen>
+            <DependentUpon>NdLinq.Zip.tt</DependentUpon>
+        </Compile>
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Update="Optimizations\Linq\NdSimdLinq.Where.tt">
+            <Generator>TextTemplatingFileGenerator</Generator>
+            <LastGenOutput>NdSimdLinq.Where.g.cs</LastGenOutput>
+        </None>
+        <Compile Update="Optimizations\Linq\NdSimdLinq.Where.g.cs">
+            <DesignTime>True</DesignTime>
+            <AutoGen>True</AutoGen>
+            <DependentUpon>NdSimdLinq.Where.tt</DependentUpon>
+        </Compile>
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Update="Optimizations\VectorOperation.Operators.tt">
+            <Generator>TextTemplatingFileGenerator</Generator>
+            <LastGenOutput>VectorOperation.Operators.g.cs</LastGenOutput>
+        </None>
+        <Compile Update="Optimizations\VectorOperation.Operators.g.cs">
+            <DesignTime>True</DesignTime>
+            <AutoGen>True</AutoGen>
+            <DependentUpon>VectorOperation.Operators.tt</DependentUpon>
+        </Compile>
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Update="Optimizations\VectorOperation.Simdize.tt">
+            <LastGenOutput>VectorOperation.Simdize.g.cs</LastGenOutput>
+            <Generator>TextTemplatingFileGenerator</Generator>
+        </None>
+        <Compile Update="Optimizations\VectorOperation.Simdize.g.cs">
+            <DesignTime>True</DesignTime>
+            <AutoGen>True</AutoGen>
+            <DependentUpon>VectorOperation.Simdize.tt</DependentUpon>
+        </Compile>
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Update="Optimizations\SimdVisitor.tt">
+            <LastGenOutput>SimdVisitor.g.cs</LastGenOutput>
+            <Generator>TextTemplatingFileGenerator</Generator>
+        </None>
+        <Compile Update="Optimizations\SimdVisitor.g.cs">
+            <DesignTime>True</DesignTime>
+            <AutoGen>True</AutoGen>
+            <DependentUpon>SimdVisitor.tt</DependentUpon>
+        </Compile>
+    </ItemGroup>
+
+</Project>

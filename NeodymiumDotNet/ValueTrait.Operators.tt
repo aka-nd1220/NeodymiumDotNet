@@ -1,0 +1,207 @@
+﻿<#@ template debug="true" hostspecific="false" language="C#" #>
+<#@ assembly name="System.Core" #>
+<#@ import namespace="System" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Numerics" #>
+<#@ output extension=".g.cs" #>
+<#
+    var operators = new []
+    {
+        new OperatorInfo("IsNumber", "bool", new (string, string)[0], null, type => "true", type => "return false", comment: "Returns <c>true</c> if the type supports mathematical operators."),
+        new OperatorInfo("Zero"       , "T", new (string, string)[0], type => $"({type})0", comment: "Gets 0 value."),
+        new OperatorInfo("One"        , "T", new (string, string)[0], type => $"({type})1", comment: "Gets 1 value."),
+        new OperatorInfo("UnaryPlus"  , "T", new []{("T", "value")}, type => $" Unsafe.As<T, {type}>(ref value)"),
+        new OperatorInfo("UnaryNegate", "T", new []{("T", "value")}, type => $"-Unsafe.As<T, {type}>(ref value)"),
+        new OperatorInfo("Not"        , "T", new []{("T", "value")}, type => $"!Unsafe.As<T, {type}>(ref value)"),
+        new OperatorInfo("Complement" , "T", new []{("T", "value")}, type => $"~Unsafe.As<T, {type}>(ref value)"),
+        new OperatorInfo("Add"        , "T", new []{("T", "lhs"), ("T", "rhs")}, type => $"({type})(Unsafe.As<T, {type}>(ref lhs) + Unsafe.As<T, {type}>(ref rhs))"),
+        new OperatorInfo("Subtract"   , "T", new []{("T", "lhs"), ("T", "rhs")}, type => $"({type})(Unsafe.As<T, {type}>(ref lhs) - Unsafe.As<T, {type}>(ref rhs))"),
+        new OperatorInfo("Multiply"   , "T", new []{("T", "lhs"), ("T", "rhs")}, type => $"({type})(Unsafe.As<T, {type}>(ref lhs) * Unsafe.As<T, {type}>(ref rhs))"),
+        new OperatorInfo("Divide"     , "T", new []{("T", "lhs"), ("T", "rhs")}, type => $"({type})(Unsafe.As<T, {type}>(ref lhs) / Unsafe.As<T, {type}>(ref rhs))"),
+        new OperatorInfo("Modulo"     , "T", new []{("T", "lhs"), ("T", "rhs")}, type => $"({type})(Unsafe.As<T, {type}>(ref lhs) % Unsafe.As<T, {type}>(ref rhs))"),
+        new OperatorInfo("BitwiseAnd" , "T", new []{("T", "lhs"), ("T", "rhs")}, type => $"({type})(Unsafe.As<T, {type}>(ref lhs) & Unsafe.As<T, {type}>(ref rhs))"),
+        new OperatorInfo("BitwiseOr"  , "T", new []{("T", "lhs"), ("T", "rhs")}, type => $"({type})(Unsafe.As<T, {type}>(ref lhs) | Unsafe.As<T, {type}>(ref rhs))"),
+        new OperatorInfo("BitwiseXor" , "T", new []{("T", "lhs"), ("T", "rhs")}, type => $"({type})(Unsafe.As<T, {type}>(ref lhs) ^ Unsafe.As<T, {type}>(ref rhs))"),
+        new OperatorInfo("Increment"  , "T", new []{("T", "value")}, type => $"++Unsafe.As<T, {type}>(ref value)"),
+        new OperatorInfo("Decrement"  , "T", new []{("T", "value")}, type => $"--Unsafe.As<T, {type}>(ref value)"),
+        new OperatorInfo("ShiftLeft"  , "T", new []{("T", "lhs"), ("int", "rhs")}, type => $"Unsafe.As<T, {type}>(ref lhs) << rhs"),
+        new OperatorInfo("ShiftRight" , "T", new []{("T", "lhs"), ("int", "rhs")}, type => $"Unsafe.As<T, {type}>(ref lhs) >> rhs"),
+        new OperatorInfo("Equals"             , "bool", new []{("T", "lhs"), ("T", "rhs")}, null, type => $"Unsafe.As<T, {type}>(ref lhs) == Unsafe.As<T, {type}>(ref rhs)"),
+        new OperatorInfo("NotEquals"          , "bool", new []{("T", "lhs"), ("T", "rhs")}, null, type => $"Unsafe.As<T, {type}>(ref lhs) != Unsafe.As<T, {type}>(ref rhs)"),
+        new OperatorInfo("LessThan"           , "bool", new []{("T", "lhs"), ("T", "rhs")}, null, type => $"Unsafe.As<T, {type}>(ref lhs) < Unsafe.As<T, {type}>(ref rhs)" ),
+        new OperatorInfo("LessThanOrEquals"   , "bool", new []{("T", "lhs"), ("T", "rhs")}, null, type => $"Unsafe.As<T, {type}>(ref lhs) <= Unsafe.As<T, {type}>(ref rhs)"),
+        new OperatorInfo("GreaterThan"        , "bool", new []{("T", "lhs"), ("T", "rhs")}, null, type => $"Unsafe.As<T, {type}>(ref lhs) > Unsafe.As<T, {type}>(ref rhs)" ),
+        new OperatorInfo("GreaterThanOrEquals", "bool", new []{("T", "lhs"), ("T", "rhs")}, null, type => $"Unsafe.As<T, {type}>(ref lhs) >= Unsafe.As<T, {type}>(ref rhs)"),
+        new OperatorInfo("FromLong"  , "T"     , new []{("long"  , "value")}, type => $"({type})value", comment: "Cast from <see href=\"long\"/> value."),
+        new OperatorInfo("FromDouble", "T"     , new []{("double", "value")}, type => $"({type})value", comment: "Cast from <see href=\"double\"/> value."),
+        new OperatorInfo("ToLong"    , "long"  , new []{("T"     , "value")}, type => $"Unsafe.As<T, {type}>(ref value)", type => $"(long)retval"  , comment: "Cast to <see href=\"long\"/> value."),
+        new OperatorInfo("ToDouble"  , "double", new []{("T"     , "value")}, type => $"Unsafe.As<T, {type}>(ref value)", type => $"(double)retval", comment: "Cast to <see href=\"double\"/> value."),
+    };
+    var typeInfos = new []
+    {
+        //                                isNum  +a,-a  !a,    ~a     a+b    a-b    a*b    a/b    a%b    a&|^b  ++--a  a>><<b != !=  < <= > >= from   to
+        new TypeInfo("bool"   , Operators(false, false, true , false, false, false, false, false, false, true , false, false, true , false,    false, false)),
+        new TypeInfo("sbyte"  , Operators(true , false, false, false, true , true , true , true , true , true , true , false, true , true ,    true , true )),
+        new TypeInfo("short"  , Operators(true , false, false, false, true , true , true , true , true , true , true , false, true , true ,    true , true )),
+        new TypeInfo("int"    , Operators(true , true , false, true , true , true , true , true , true , true , true , true , true , true ,    true , true )),
+        new TypeInfo("long"   , Operators(true , true , false, true , true , true , true , true , true , true , true , true , true , true ,    true , true )),
+        new TypeInfo("byte"   , Operators(true , false, false, false, true , true , true , true , true , true , true , false, true , true ,    true , true )),
+        new TypeInfo("ushort" , Operators(true , false, false, false, true , true , true , true , true , true , true , false, true , true ,    true , true )),
+        new TypeInfo("uint"   , Operators(true , false, false, true , true , true , true , true , true , true , true , true , true , true ,    true , true )),
+        new TypeInfo("ulong"  , Operators(true , false, false, true , true , true , true , true , true , true , true , true , true , true ,    true , true )),
+        new TypeInfo("float"  , Operators(true , true , false, false, true , true , true , true , true , false, true , false, true , true ,    true , true )),
+        new TypeInfo("double" , Operators(true , true , false, false, true , true , true , true , true , false, true , false, true , true ,    true , true )),
+        new TypeInfo("decimal", Operators(true , true , false, false, true , true , true , true , true , false, true , false, true , true ,    true , true )),
+        new TypeInfo("Complex", Operators(true , true , false, false, true , true , true , true , false, false, false, false, true , false,    true , false)),
+        new TypeInfo("char"   , Operators(true , false, false, false, false, false, false, false, false, false, true , false, true , true ,    true , true )),
+        new TypeInfo("string" , Operators(false, false, false, false, true , false, false, false, false, false, false, false, true , false,    false, false)),
+    };
+#>
+//
+// T4 auto generated code
+//
+using System;
+using System.Numerics;
+using System.Runtime.CompilerServices;
+
+namespace NeodymiumDotNet
+{
+    partial class ValueTrait
+    {
+<#
+foreach(var op in operators)
+{
+#>
+        /// <summary>
+        ///     <#=op.Comment#>
+        /// </summary>
+        /// <typeparam name="T"></typeparam><#=string.Join("", op.Arguments.Select(tpl => $"\r\n        /// <param name=\"{tpl.name}\"></param>"))#>
+        /// <returns></returns>
+        /// <exception cref="NotSupportedException"></exception>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static <#=op.ReturnType#> <#=op.Name#><T>(<#=string.Join(", ", op.Arguments.Select(tpl => $"{tpl.type} {tpl.name}"))#>)
+        {
+<#
+    foreach(var type in typeInfos)
+    {
+#>
+            if(typeof(T) == typeof(<#=type.Name#>))
+<#
+        if(type.OperatorAvailabilities[op.Name])
+        {
+#>
+            {
+<#
+            if(op.GenerateRetval != null)
+            {
+#>
+                var retval = <#=op.GenerateRetval(type.Name)#>;
+<#
+            }
+#>
+                return <#=op.GenerateReturn(type.Name)#>;
+            }
+<#
+        }
+        else
+        {
+#>
+            {
+                <#=op.GenerateNotSupported(type.Name)#>;
+            }
+<#
+        }
+    }
+#>
+
+            return Cache<T>.Trait.<#=op.Name#>(<#=string.Join(", ", op.Arguments.Select(tpl => tpl.name))#>);
+        }
+
+
+<#
+}
+#>
+
+    }
+}
+
+<#+
+public class TypeInfo
+{
+    public string Name { get; }
+
+    public Dictionary<string, bool> OperatorAvailabilities { get; }
+
+    public TypeInfo(string name, Dictionary<string, bool> operatorAvailabilities)
+    {
+        Name = name;
+        OperatorAvailabilities = operatorAvailabilities;
+    }
+}
+
+public class OperatorInfo
+{
+    public string Name { get; }
+
+    public string ReturnType { get; }
+
+    public (string type, string name)[] Arguments { get; }
+
+    public Func<string, string> GenerateRetval { get; }
+
+    public Func<string, string> GenerateReturn { get; }
+
+    public Func<string, string> GenerateNotSupported { get; }
+
+    public string Comment { get; }
+
+    public OperatorInfo(string name, string returnType, (string type, string name)[] arguments, Func<string, string> generateRetval, Func<string, string> generateReturn = null, Func<string, string> generateNotSupported = null, string comment = null)
+    {
+        Name = name;
+        ReturnType = returnType;
+        Arguments = arguments;
+        GenerateRetval = generateRetval;
+        GenerateReturn = generateReturn ?? (type => $"Unsafe.As<{type}, T>(ref retval)");
+        GenerateNotSupported = generateNotSupported ?? (type => $"throw new NotSupportedException(\"The operation '{Name}' for type '{type}' is not supported.\")");
+        Comment = comment ?? $"Calculates {Name} operation.";
+    }
+}
+
+public Dictionary<string, bool> Operators(bool isnumber, bool sign, bool not, bool compl, bool add, bool sub, bool mul, bool div, bool mod, bool bitwise, bool incr_decr, bool shift, bool eq, bool order, bool from, bool to)
+{
+    var dic = new Dictionary<string, bool>
+    {
+        { "IsNumber"           , isnumber },
+        { "Zero"               , isnumber },
+        { "One"                , isnumber },
+        { "UnaryPlus"          , sign },
+        { "UnaryNegate"        , sign },
+        { "Not"                , not },
+        { "Complement"         , compl },
+        { "Add"                , add },
+        { "Subtract"           , sub },
+        { "Multiply"           , mul },
+        { "Divide"             , div },
+        { "Modulo"             , mod },
+        { "BitwiseAnd"         , bitwise },
+        { "BitwiseOr"          , bitwise },
+        { "BitwiseXor"         , bitwise },
+        { "Increment"          , incr_decr },
+        { "Decrement"          , incr_decr },
+        { "ShiftLeft"          , shift },
+        { "ShiftRight"         , shift },
+        { "Equals"             , eq },
+        { "NotEquals"          , eq },
+        { "LessThan"           , order },
+        { "LessThanOrEquals"   , order },
+        { "GreaterThan"        , order },
+        { "GreaterThanOrEquals", order },
+        { "FromLong"           , from },
+        { "FromDouble"         , from },
+        { "ToLong"             , to },
+        { "ToDouble"           , to },
+    };
+    return dic;
+}
+#>

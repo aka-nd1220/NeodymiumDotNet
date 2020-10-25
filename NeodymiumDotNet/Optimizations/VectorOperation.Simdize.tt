@@ -1,0 +1,40 @@
+﻿<#@ template debug="false" hostspecific="false" language="C#" #>
+<#@ assembly name="System.Core" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Text" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ output extension=".g.cs" #>
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Linq.Expressions;
+using System.Numerics;
+using System.Reflection;
+
+
+namespace NeodymiumDotNet.Optimizations
+{
+    partial class VectorOperation
+    {
+<#
+for(var i = 0; i <= 14; ++i)
+{
+        var returnType = "Action<" + string.Concat(Enumerable.Range(0, i).Select(_ => $"ReadOnlyMemory<T>, ")) + "Memory<T>>";
+        var exprType = "Func<" + string.Concat(Enumerable.Range(0, i).Select(_ => $"T, ")) + "T>";
+#>
+
+        /// <summary>
+        ///     Converts the specified operation for primitive type to the operation delegate for primitive array with SIMD.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="expr"></param>
+        /// <returns></returns>
+        public static <#=returnType#> Simdize<T>(Expression<<#=exprType#>> expr)
+            where T : unmanaged
+            => Simdize<T, <#=returnType#>>(expr);
+
+<#
+}
+#>
+    }
+}

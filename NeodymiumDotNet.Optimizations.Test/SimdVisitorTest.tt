@@ -1,0 +1,83 @@
+﻿<#@ template debug="false" hostspecific="false" language="C#" #>
+<#@ assembly name="System.Core" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Text" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ output extension=".g.cs" #>
+using System;
+using System.Collections.Generic;
+using System.Linq.Expressions;
+using System.Numerics;
+using System.Text;
+using Xunit;
+namespace NeodymiumDotNet.Optimizations.Test
+{
+    partial class SimdVisitorTest
+    {
+<#
+for(var i = 0; i <= 8; ++i)
+{
+#>
+        private void TestCore<T>(
+            Expression<Func<<#=string.Concat(Enumerable.Repeat("T, ", i))#>T>> expr
+<#
+    for(var j = 1; j <= i; ++j)
+    {
+#>
+            , Vector<T> x<#=j#>
+<#
+    }
+#>
+            )
+            where T : unmanaged
+        {
+            var visitor = new SimdVisitor<T>(expr);
+            var simd_expr = visitor.VisitFuncLambda(expr);
+            var f = expr.Compile();
+            var sf = simd_expr.Compile();
+            Vector<T> expected;
+            {
+                var buffer = new T[Vector<T>.Count];
+                for(var i = 0; i < Vector<T>.Count; ++i)
+                    buffer[i] = f(<#=string.Join(", ", Enumerable.Range(1, i).Select(i => $"x{i}[i]"))#>);
+                expected = new Vector<T>(buffer);
+            }
+            var actual = sf(<#=string.Join(", ", Enumerable.Range(1, i).Select(i => $"x{i}"))#>);
+
+            if(typeof(T) == typeof(float))
+            {
+                var s_expected = (Vector<float>)expected;
+                var s_actual = (Vector<float>)actual;
+                for(var i = 0; i < Vector<float>.Count; ++i)
+                {
+                    Assert.False(
+                        float.IsNaN(s_expected[i]) ^ float.IsNaN(s_actual[i]),
+                        $"expected: {s_expected[i]}, actual: {s_actual[i]}");
+                    if(float.IsNaN(s_expected[i]))
+                        continue;
+                    Assert.Equal(s_expected[i], s_actual[i]);
+                }
+            }
+            else if(typeof(T) == typeof(double))
+            {
+                var d_expected = (Vector<double>)expected;
+                var d_actual = (Vector<double>)actual;
+                for(var i = 0; i < Vector<double>.Count; ++i)
+                {
+                    Assert.False(
+                        double.IsNaN(d_expected[i]) ^ double.IsNaN(d_actual[i]),
+                        $"expected: {d_expected[i]}, actual: {d_actual[i]}");
+                    if(double.IsNaN(d_expected[i]))
+                        continue;
+                    Assert.Equal(d_expected[i], d_actual[i]);
+                }
+            }
+            else
+                Assert.Equal(expected, actual);
+        }
+
+<#
+}
+#>
+    }
+}
